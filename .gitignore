@@ -1,0 +1,55 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+.pytest_cache/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Packaging & Distribution
+build/
+dist/
+*.egg-info/
+*.spec.bak
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# Temporary & Test files
+tmp_test/
+*.tmp
+*.bak
+
+# Secrets & Environment Variables
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.pfx
+*.p12
+*.cert
+credentials*
+secret*
+
+# Operating System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 内置工具二进制（ffmpeg 等，体积大，由用户自行准备）
+resources/tools/*
+!resources/tools/.gitkeep
