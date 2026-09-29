@@ -169,242 +169,283 @@ def apply_system_spin_style(widget: QAbstractSpinBox) -> None:
 
 
 def dialog_style() -> str:
-    """现代化浅色调样式表。"""
-    check_svg = asset_path("check_mark.svg").resolve().as_posix()
-    return f"""
-QWidget {{
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    color: #24292f;
+    """专业桌面工具浅色样式：柔和中性底 + 克制主色，弱化极客终端感。"""
+    return """
+QWidget {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    color: #1C1C1E;
+    font-size: 13px;
+}
+QWidget#FastConvertWindow {
+    background: #F4F5F7;
+}
+QDialog {
+    background: #FFFFFF;
+}
+QLabel#sectionLabel {
+    color: #6B7280;
+    font-weight: 500;
     font-size: 12px;
-}}
-QDialog, QMainWindow, QWidget#centralWidget {{
-    background: #ffffff;
-}}
-QLabel#sectionLabel {{
-    color: #57606a;
+}
+QLabel#hintLabel {
+    color: #9CA3AF;
+    font-size: 12px;
+}
+QLineEdit {
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    padding: 5px 10px;
+    background: #FFFFFF;
+    min-height: 18px;
+    selection-background-color: #2F6FED;
+    selection-color: #FFFFFF;
+}
+QLineEdit:focus {
+    border-color: #2F6FED;
+}
+QPushButton {
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    padding: 5px 14px;
+    background: #FFFFFF;
+    color: #1C1C1E;
     font-weight: 500;
-}}
-QLabel#hintLabel {{
-    color: #656d76;
-    font-size: 11px;
-}}
-QLabel#logCaption {{
-    color: #57606a;
-    font-size: 11px;
-    font-weight: 500;
-}}
-QLineEdit {{
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 3px 8px;
-    background: #ffffff;
-    selection-background-color: #0969da;
-    selection-color: #ffffff;
-}}
-QLineEdit:focus {{
-    border-color: #0969da;
-}}
-QPushButton {{
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 3px 12px;
-    background: #f6f8fa;
-    color: #24292f;
-    font-weight: 500;
-}}
-QPushButton:hover {{
-    background: #f3f4f6;
-    border-color: #1b1f2426;
-}}
-QPushButton:pressed {{
-    background: #ebecf0;
-}}
-QPushButton#primaryButton {{
-    background: #1f6feb;
-    color: #ffffff;
-    border: 1px solid #1a5ec4;
-}}
-QPushButton#primaryButton:hover {{
-    background: #388bfd;
-}}
-QPushButton#primaryButton:disabled {{
-    background: #8bb4f0;
-    color: #ffffff;
-    border-color: #8bb4f0;
-}}
-QPushButton#dangerButton {{
-    background: #ffffff;
-    color: #cf222e;
-    border: 1px solid #d0d7de;
-}}
-QPushButton#dangerButton:hover {{
-    background: #ffebe9;
-    border-color: #ff8182;
-}}
-QPushButton#dangerButton:disabled {{
-    color: #8c959f;
-    background: #f6f8fa;
-    border-color: #d0d7de;
-}}
-QPushButton#langBtn {{
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    background: #f6f8fa;
+    min-height: 18px;
+}
+QPushButton:hover {
+    background: #F9FAFB;
+    border-color: #C4C9D1;
+}
+QPushButton:pressed {
+    background: #F3F4F6;
+}
+QPushButton#primaryButton {
+    background: #2F6FED;
+    color: #FFFFFF;
+    border: 1px solid #2563EB;
+    padding: 6px 18px;
+    font-weight: 600;
+}
+QPushButton#primaryButton:hover {
+    background: #3B7CF0;
+    border-color: #2F6FED;
+}
+QPushButton#primaryButton:pressed {
+    background: #2563EB;
+}
+QPushButton#primaryButton:disabled {
+    background: #93B4F5;
+    color: #FFFFFF;
+    border-color: #93B4F5;
+}
+QPushButton#dangerButton {
+    background: #FFFFFF;
+    color: #DC2626;
+    border: 1px solid #D1D5DB;
+}
+QPushButton#dangerButton:hover {
+    background: #FEF2F2;
+    border-color: #FECACA;
+}
+QPushButton#dangerButton:disabled {
+    color: #9CA3AF;
+    background: #F9FAFB;
+    border-color: #E5E7EB;
+}
+QPushButton#ghostButton {
+    background: transparent;
+    color: #6B7280;
+    border: 1px solid transparent;
+}
+QPushButton#ghostButton:hover {
+    background: #EEF0F3;
+    color: #1C1C1E;
+    border-color: #E5E7EB;
+}
+QPushButton#langBtn {
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    background: #FFFFFF;
     padding: 0;
-    min-width: 26px;
-    max-width: 26px;
-    min-height: 26px;
-    max-height: 26px;
-}}
-QPushButton#langBtn:hover {{
-    background: #ffffff;
-    border-color: #0969da;
-}}
-QPushButton#modeSeg, QPushButton#modeSegFirst, QPushButton#modeSegLast {{
-    background: #ffffff;
-    color: #57606a;
-    border: 1px solid #d0d7de;
-    padding: 0 14px;
-    min-height: 26px;
-    max-height: 26px;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+}
+QPushButton#langBtn:hover {
+    background: #F9FAFB;
+    border-color: #2F6FED;
+}
+QPushButton#modeSeg, QPushButton#modeSegFirst, QPushButton#modeSegLast {
+    background: #FFFFFF;
+    color: #6B7280;
+    border: 1px solid #D1D5DB;
+    padding: 0 16px;
+    min-height: 28px;
+    max-height: 28px;
     font-size: 12px;
     border-radius: 0;
-}}
-QPushButton#modeSegFirst {{
-    border-top-left-radius: 6px;
-    border-bottom-left-radius: 6px;
-}}
-QPushButton#modeSegLast {{
-    border-top-right-radius: 6px;
-    border-bottom-right-radius: 6px;
+}
+QPushButton#modeSegFirst {
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+}
+QPushButton#modeSegLast {
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
     margin-left: -1px;
-}}
-QPushButton#modeSeg {{
+}
+QPushButton#modeSeg {
     margin-left: -1px;
-}}
-QPushButton#modeSeg:checked, QPushButton#modeSegFirst:checked, QPushButton#modeSegLast:checked {{
-    background: #1f6feb;
-    color: #ffffff;
-    border-color: #1f6feb;
+}
+QPushButton#modeSeg:checked, QPushButton#modeSegFirst:checked, QPushButton#modeSegLast:checked {
+    background: #2F6FED;
+    color: #FFFFFF;
+    border-color: #2F6FED;
     font-weight: 600;
-}}
-QPushButton#modeSeg:hover:!checked, QPushButton#modeSegFirst:hover:!checked, QPushButton#modeSegLast:hover:!checked {{
-    background: #f6f8fa;
-    color: #24292f;
-}}
-QPushButton#modeSeg:disabled, QPushButton#modeSegFirst:disabled, QPushButton#modeSegLast:disabled {{
-    color: #afb8c1;
-    background: #f6f8fa;
-}}
-QComboBox {{
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 2px 8px;
-    background: #ffffff;
-}}
-QComboBox:focus {{
-    border-color: #0969da;
-}}
-QComboBox::drop-down {{
+}
+QPushButton#modeSeg:hover:!checked, QPushButton#modeSegFirst:hover:!checked, QPushButton#modeSegLast:hover:!checked {
+    background: #F9FAFB;
+    color: #1C1C1E;
+}
+QPushButton#modeSeg:disabled, QPushButton#modeSegFirst:disabled, QPushButton#modeSegLast:disabled {
+    color: #C4C9D1;
+    background: #F9FAFB;
+}
+QComboBox {
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    padding: 3px 10px;
+    background: #FFFFFF;
+    min-height: 18px;
+}
+QComboBox:focus {
+    border-color: #2F6FED;
+}
+QComboBox::drop-down {
     border: none;
     width: 20px;
-}}
-QPushButton#langItemBtn {{
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    background: #ffffff;
-    color: #24292f;
+}
+QPushButton#langItemBtn {
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    background: #FFFFFF;
+    color: #1C1C1E;
     font-size: 13px;
     font-weight: 500;
     padding: 0 12px;
-    min-height: 30px;
-    max-height: 30px;
+    min-height: 32px;
+    max-height: 32px;
     text-align: center;
-}}
-QPushButton#langItemBtn:hover {{
-    background: #f3f8ff;
-    border-color: #0969da;
-    color: #0969da;
-}}
-QPushButton#langItemBtn[current="true"] {{
-    background: #ddf4ff;
-    border: 1.5px solid #0969da;
-    color: #0969da;
+}
+QPushButton#langItemBtn:hover {
+    background: #EFF6FF;
+    border-color: #2F6FED;
+    color: #2F6FED;
+}
+QPushButton#langItemBtn[current="true"] {
+    background: #EFF6FF;
+    border: 1.5px solid #2F6FED;
+    color: #2F6FED;
     font-weight: 600;
-}}
-QLabel#perfLabel {{
-    color: #57606a;
-    background: #f6f8fa;
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 0 8px;
+}
+QLabel#perfLabel {
+    color: #6B7280;
+    background: transparent;
+    border: none;
+    padding: 0 2px;
     min-height: 24px;
     max-height: 24px;
     font-size: 11px;
-    font-family: Consolas, "Segoe UI", "Microsoft YaHei", sans-serif;
-}}
-QLabel#perfLabel:hover {{
-    background: #ffffff;
-    border-color: #0969da;
-    color: #24292f;
-}}
-QLabel#etaLabel {{
-    color: #0969da;
-    background: #ddf4ff;
-    border: 1px solid #54aeff;
-    border-radius: 6px;
+}
+QLabel#perfLabel:hover {
+    color: #1C1C1E;
+}
+QLabel#etaLabel {
+    color: #1D4ED8;
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 8px;
     padding: 0 10px;
-    min-height: 24px;
-    max-height: 24px;
-    font-size: 11px;
+    min-height: 26px;
+    max-height: 26px;
+    font-size: 12px;
     font-weight: 500;
-    font-family: Consolas, "Segoe UI", "Microsoft YaHei", sans-serif;
-}}
-QLabel#etaLabel:hover {{
-    background: #c8ebff;
-    border-color: #0969da;
-}}
-QLabel#fileStatusHint {{
-    color: #656d76;
-    font-size: 11px;
-}}
-QLabel#fileStatusHint[hasFiles="true"] {{
-    color: #0969da;
+}
+QLabel#etaLabel:hover {
+    background: #DBEAFE;
+    border-color: #93C5FD;
+}
+QLabel#fileStatusHint {
+    color: #9CA3AF;
+    font-size: 12px;
+}
+QLabel#fileStatusHint[hasFiles="true"] {
+    color: #2F6FED;
     font-weight: 600;
-}}
-QPlainTextEdit#logView {{
-    background-color: #f6f8fa;
-    color: #24292f;
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-family: Consolas, "Cascadia Code", "Segoe UI Mono", monospace;
-    font-size: 11px;
-    selection-background-color: #b6e3ff;
-    selection-color: #0969da;
-}}
-QScrollBar:vertical {{
+}
+QPushButton#logToggle {
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 10px;
+    color: #4B5563;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    padding: 7px 12px;
+    min-height: 20px;
+}
+QPushButton#logToggle:hover {
+    background: #F9FAFB;
+    border-color: #D1D5DB;
+    color: #1C1C1E;
+}
+QPushButton#logToggle[expanded="true"] {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom-color: #EEF0F3;
+    color: #1C1C1E;
+}
+QPushButton#logToggle[hasOutput="true"] {
+    color: #2F6FED;
+}
+QPlainTextEdit#logView {
+    background-color: #FFFFFF;
+    color: #374151;
+    border: 1px solid #E5E7EB;
+    border-top: none;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+    padding: 8px 12px;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+    font-size: 12px;
+    selection-background-color: #DBEAFE;
+    selection-color: #1D4ED8;
+}
+QScrollBar:vertical {
     border: none;
     background: transparent;
     width: 6px;
     margin: 4px 2px 4px 0px;
-}}
-QScrollBar::handle:vertical {{
-    background: #d0d7de;
+}
+QScrollBar::handle:vertical {
+    background: #D1D5DB;
     min-height: 24px;
     border-radius: 3px;
-}}
-QScrollBar::handle:vertical:hover {{
-    background: #8c959f;
-}}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+}
+QScrollBar::handle:vertical:hover {
+    background: #9CA3AF;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     border: none;
     background: none;
     height: 0px;
-}}
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     background: none;
-}}
+}
 """
 
 
@@ -471,8 +512,8 @@ class VideoDropZone(QFrame):
         self.setObjectName("videoDropZone")
         self.setAcceptDrops(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedWidth(200)
-        self.setMinimumHeight(132)
+        self.setFixedWidth(210)
+        self.setMinimumHeight(148)
 
         self._dragging = False
         self._has_files = False
@@ -514,7 +555,7 @@ class VideoDropZone(QFrame):
         self.sub_label = QLabel()
         self.sub_label.setAlignment(Qt.AlignCenter)
         self.sub_label.setWordWrap(True)
-        self.sub_label.setStyleSheet("color:#656d76; font-size:11px; background:transparent;")
+        self.sub_label.setStyleSheet("color:#9CA3AF; font-size:11px; background:transparent;")
         layout.addWidget(self.sub_label)
 
         self.clear_btn = QPushButton()
@@ -523,11 +564,11 @@ class VideoDropZone(QFrame):
         self.clear_btn.setFixedHeight(22)
         self.clear_btn.setStyleSheet("""
             QPushButton#dropClear {
-                background:transparent; color:#57606a; border:1px solid #d0d7de;
-                border-radius:4px; padding:0 10px; font-size:11px;
+                background:transparent; color:#6B7280; border:1px solid #D1D5DB;
+                border-radius:6px; padding:0 10px; font-size:11px;
             }
-            QPushButton#dropClear:hover { background:#ffffff; color:#cf222e; border-color:#ff8182; }
-            QPushButton#dropClear:disabled { color:#afb8c1; border-color:#eaeef2; }
+            QPushButton#dropClear:hover { background:#FEF2F2; color:#DC2626; border-color:#FECACA; }
+            QPushButton#dropClear:disabled { color:#C4C9D1; border-color:#E5E7EB; }
         """)
         self.clear_btn.clicked.connect(self.clearRequested.emit)
         self.clear_btn.setVisible(False)
@@ -544,15 +585,15 @@ class VideoDropZone(QFrame):
         if self._dragging:
             self.title_label.setText(t("drop_title_active"))
             self.sub_label.setText("")
-            title_color = "#1f6feb"
+            title_color = "#2F6FED"
         elif self._has_files:
             self.title_label.setText(t("drop_title_has_files", count=self._count))
             self.sub_label.setText(self._first_name)
-            title_color = "#0969da"
+            title_color = "#2563EB"
         else:
             self.title_label.setText(t("drop_title_empty"))
             self.sub_label.setText(t("drop_sub_empty"))
-            title_color = "#24292f"
+            title_color = "#1C1C1E"
         self.title_label.setStyleSheet(
             f"color:{title_color}; font-size:13px; font-weight:600; background:transparent;"
         )
@@ -583,17 +624,17 @@ class VideoDropZone(QFrame):
         painter.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
         path = QPainterPath()
-        path.addRoundedRect(rect, 8, 8)
+        path.addRoundedRect(rect, 10, 10)
 
         if self._dragging:
-            pen = QPen(QColor("#1f6feb"), 1.6, Qt.DashLine)
-            painter.fillPath(path, QColor("#ddf4ff"))
+            pen = QPen(QColor("#2F6FED"), 1.6, Qt.DashLine)
+            painter.fillPath(path, QColor("#EFF6FF"))
         elif self._has_files:
-            pen = QPen(QColor("#54aeff"), 1.2, Qt.DashLine)
-            painter.fillPath(path, QColor("#f6f8fa"))
+            pen = QPen(QColor("#93C5FD"), 1.2, Qt.DashLine)
+            painter.fillPath(path, QColor("#F8FAFC"))
         else:
-            pen = QPen(QColor("#d0d7de"), 1.2, Qt.DashLine)
-            painter.fillPath(path, QColor("#ffffff"))
+            pen = QPen(QColor("#D1D5DB"), 1.2, Qt.DashLine)
+            painter.fillPath(path, QColor("#FFFFFF"))
 
         painter.setPen(pen)
         painter.drawPath(path)
@@ -675,9 +716,14 @@ class FastConvertWindow(QWidget):
         self._main_proc: Any = None
 
         # 窗口样式与属性
+        self.setObjectName("FastConvertWindow")
         self.setMinimumSize(780, 560)
         self.setWindowIcon(QIcon(str(asset_path("app.png"))))
         self.setStyleSheet(dialog_style())
+
+        # 日志面板默认折叠；任务开始时自动展开
+        self._log_expanded = False
+        self._log_has_output = False
 
         self.log_signal.connect(self.write_log)
         self.log_highlight_signal.connect(self.write_highlight_log)
@@ -686,18 +732,19 @@ class FastConvertWindow(QWidget):
 
         self._build_ui()
         self._retranslate_ui()
+        self._set_log_expanded(False, animate=False)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 14, 16, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(20, 18, 20, 16)
+        root.setSpacing(12)
 
         # 顶部工作目录行
         dir_row = QHBoxLayout()
         dir_row.setSpacing(8)
         self.dir_label = QLabel()
         self.dir_label.setObjectName("sectionLabel")
-        self.dir_label.setFixedWidth(56)
+        self.dir_label.setFixedWidth(60)
 
         self.dir_edit = QLineEdit(str(self.working_dir))
         self.dir_edit.editingFinished.connect(self._on_dir_edited)
@@ -709,7 +756,7 @@ class FastConvertWindow(QWidget):
         self.lang_btn = QPushButton()
         self.lang_btn.setObjectName("langBtn")
         self.lang_btn.setCursor(Qt.PointingHandCursor)
-        self.lang_btn.setFixedSize(26, 26)
+        self.lang_btn.setFixedSize(28, 28)
         globe_icon = QIcon(str(asset_path("globe.svg")))
         if not globe_icon.isNull():
             self.lang_btn.setIcon(globe_icon)
@@ -724,16 +771,16 @@ class FastConvertWindow(QWidget):
 
         # 中部主体区
         body = QHBoxLayout()
-        body.setSpacing(12)
+        body.setSpacing(14)
         left = QVBoxLayout()
-        left.setSpacing(8)
+        left.setSpacing(10)
 
         # 工作模式行
         mode_row = QHBoxLayout()
         mode_row.setSpacing(8)
         self.mode_label = QLabel()
         self.mode_label.setObjectName("sectionLabel")
-        self.mode_label.setFixedWidth(56)
+        self.mode_label.setFixedWidth(60)
         mode_row.addWidget(self.mode_label)
 
         self.mode_group = QButtonGroup(self)
@@ -777,7 +824,7 @@ class FastConvertWindow(QWidget):
         self.mode_hint = QLabel()
         self.mode_hint.setObjectName("hintLabel")
         self.mode_hint.setWordWrap(True)
-        self.mode_hint.setContentsMargins(64, 0, 0, 0)
+        self.mode_hint.setContentsMargins(68, 0, 0, 0)
         left.addWidget(self.mode_hint)
 
         # 参数行（CRF / 缩放 / 线程 / 速度）
@@ -787,7 +834,7 @@ class FastConvertWindow(QWidget):
 
         self.crf_label = QLabel()
         self.crf_label.setObjectName("sectionLabel")
-        self.crf_label.setFixedWidth(56)
+        self.crf_label.setFixedWidth(60)
         param_row.addWidget(self.crf_label)
 
         self.crf_spin = QSpinBox()
@@ -832,8 +879,9 @@ class FastConvertWindow(QWidget):
         self.param_hint = QLabel()
         self.param_hint.setObjectName("hintLabel")
         self.param_hint.setWordWrap(True)
-        self.param_hint.setContentsMargins(64, 0, 0, 0)
+        self.param_hint.setContentsMargins(68, 0, 0, 0)
         left.addWidget(self.param_hint)
+        left.addStretch(1)
 
         # 右侧拖放区
         self.drop_zone = VideoDropZone(self)
@@ -842,28 +890,38 @@ class FastConvertWindow(QWidget):
         self.drop_zone.clearRequested.connect(self._clear_manual_files)
 
         body.addLayout(left, 1)
-        body.addWidget(self.drop_zone)
-        root.addLayout(body)
+        body.addWidget(self.drop_zone, 0, Qt.AlignTop)
+        root.addLayout(body, 1)
 
-        # 运行日志
-        self.log_caption = QLabel()
-        self.log_caption.setObjectName("logCaption")
-        root.addWidget(self.log_caption)
+        # 可折叠运行日志：标题条点击切换，任务开始时自动展开
+        self.log_toggle_btn = QPushButton()
+        self.log_toggle_btn.setObjectName("logToggle")
+        self.log_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self.log_toggle_btn.setFocusPolicy(Qt.NoFocus)
+        self.log_toggle_btn.setMinimumHeight(32)
+        self.log_toggle_btn.clicked.connect(self._toggle_log)
+        root.addWidget(self.log_toggle_btn)
+
+        # 兼容旧引用名（翻译/外部如有使用）
+        self.log_caption = self.log_toggle_btn
 
         self.log = QPlainTextEdit()
         self.log.setObjectName("logView")
         self.log.setReadOnly(True)
-        root.addWidget(self.log, 1)
+        self.log.setMinimumHeight(0)
+        self.log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        root.addWidget(self.log, 2)
 
         # 底部操作栏（左侧监控，右侧操作按钮）
         bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(8)
         bottom_row.setAlignment(Qt.AlignVCenter)
 
         self.perf_label = QLabel()
         self.perf_label.setObjectName("perfLabel")
         bottom_row.addWidget(self.perf_label)
 
-        bottom_row.addSpacing(10)
+        bottom_row.addSpacing(8)
         self.eta_label = QLabel()
         self.eta_label.setObjectName("etaLabel")
         self.eta_label.setVisible(False)
@@ -873,14 +931,18 @@ class FastConvertWindow(QWidget):
 
         self.start_btn = QPushButton()
         self.start_btn.setObjectName("primaryButton")
+        self.start_btn.setCursor(Qt.PointingHandCursor)
         self.start_btn.clicked.connect(self.start)
 
         self.cancel_btn = QPushButton()
         self.cancel_btn.setObjectName("dangerButton")
+        self.cancel_btn.setCursor(Qt.PointingHandCursor)
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self.cancel_batch)
 
         self.close_btn = QPushButton()
+        self.close_btn.setObjectName("ghostButton")
+        self.close_btn.setCursor(Qt.PointingHandCursor)
         self.close_btn.clicked.connect(self.close)
 
         bottom_row.addWidget(self.start_btn)
@@ -1011,12 +1073,12 @@ class FastConvertWindow(QWidget):
         self.preset_combo.setCurrentIndex(max(0, found_p_idx))
         self.preset_combo.blockSignals(False)
 
-        self.log_caption.setText(t("log_caption"))
         self.cancel_btn.setText(t("btn_cancel"))
         self.close_btn.setText(t("btn_close"))
 
         self.drop_zone.retranslate()
         self._apply_mode_state()
+        self._update_log_header()
         self._update_perf_stats()
 
     def _current_mode(self) -> str:
@@ -1145,35 +1207,89 @@ class FastConvertWindow(QWidget):
         self._manual_files = None
         self.drop_zone.set_files([])
 
+    def _toggle_log(self) -> None:
+        """用户点击日志标题条时展开/收起日志面板。"""
+        self._set_log_expanded(not self._log_expanded)
+
+    def _set_log_expanded(self, expanded: bool, *, animate: bool = True) -> None:
+        """设置日志面板展开状态；收起时把纵向空间还给主操作区。
+
+        @author Grok @date 2026-03-23
+        """
+        del animate  # 预留：当前用显隐切换，避免高度动画抖动
+        self._log_expanded = bool(expanded)
+        self.log.setVisible(self._log_expanded)
+        if self._log_expanded:
+            self.log.setMinimumHeight(140)
+            self.log.setMaximumHeight(16777215)
+        else:
+            self.log.setMinimumHeight(0)
+            self.log.setMaximumHeight(0)
+        self._update_log_header()
+
+    def _update_log_header(self) -> None:
+        """按折叠状态 / 是否有输出 / 是否忙碌刷新日志标题条文案与样式。"""
+        if not hasattr(self, "log_toggle_btn"):
+            return
+        if self._log_expanded:
+            # 纯文案，避免部分中文字体缺箭头字形导致方框
+            label = t("log_toggle_collapse")
+            tip = t("log_toggle_collapse")
+        elif self._busy:
+            label = t("log_collapsed_running")
+            tip = t("log_toggle_expand")
+        elif self._log_has_output:
+            label = t("log_collapsed_has_output")
+            tip = t("log_toggle_expand")
+        else:
+            label = t("log_collapsed_hint")
+            tip = t("log_toggle_expand")
+
+        self.log_toggle_btn.setText(label)
+        self.log_toggle_btn.setToolTip(tip)
+        self.log_toggle_btn.setProperty("expanded", "true" if self._log_expanded else "false")
+        self.log_toggle_btn.setProperty("hasOutput", "true" if (self._log_has_output and not self._log_expanded) else "false")
+        # 触发 QSS 动态属性刷新
+        self.log_toggle_btn.style().unpolish(self.log_toggle_btn)
+        self.log_toggle_btn.style().polish(self.log_toggle_btn)
+
     def write_log(self, text: str) -> None:
+        self._log_has_output = True
         self.log.appendPlainText(text)
+        if not self._log_expanded:
+            self._update_log_header()
 
     def write_highlight_log(self, text: str, level: str = "success") -> None:
         """在运行日志中以醒目的前景色与背景色插入高亮结论行。
 
         @author Gemini 3.8 Flash @date 2026-09-04
         """
+        self._log_has_output = True
+        if not self._log_expanded:
+            self._set_log_expanded(True)
+
         cursor = self.log.textCursor()
         cursor.movePosition(QTextCursor.End)
         fmt = QTextCharFormat()
         if level == "success":
-            fmt.setForeground(QColor("#1a7f37"))  # 醒目健康深绿
-            fmt.setBackground(QColor("#dafbe1"))  # 浅薄荷绿底色
+            fmt.setForeground(QColor("#059669"))
+            fmt.setBackground(QColor("#ECFDF5"))
         elif level == "warning":
-            fmt.setForeground(QColor("#9a6700"))  # 琥珀橙黄
-            fmt.setBackground(QColor("#fff8c5"))  # 浅暖黄底色
+            fmt.setForeground(QColor("#D97706"))
+            fmt.setBackground(QColor("#FFFBEB"))
         elif level == "error":
-            fmt.setForeground(QColor("#cf222e"))  # 警示红
-            fmt.setBackground(QColor("#ffebe9"))  # 浅淡红底色
+            fmt.setForeground(QColor("#DC2626"))
+            fmt.setBackground(QColor("#FEF2F2"))
         else:
-            fmt.setForeground(QColor("#0969da"))  # 主题品牌蓝
-            fmt.setBackground(QColor("#ddf4ff"))  # 浅天蓝底色
+            fmt.setForeground(QColor("#1D4ED8"))
+            fmt.setBackground(QColor("#EFF6FF"))
         fmt.setFontWeight(QFont.Bold)
 
         cursor.insertText(f"\n{text}\n", fmt)
         cursor.setCharFormat(QTextCharFormat())
         self.log.setTextCursor(cursor)
         self.log.ensureCursorVisible()
+        self._update_log_header()
 
     def _format_elapsed_text(self, seconds: float) -> str:
         """将耗时秒数格式化为中英自然语言描述（如 5分57秒 (357s)）。
@@ -1228,11 +1344,13 @@ class FastConvertWindow(QWidget):
         mode = self._current_mode()
         files = self._manual_files or self._scan_files(workdir, mode)
         if not files:
+            self._set_log_expanded(True)
             self.write_log(t("log_no_videos"))
             return
 
         self._busy = True
         self._cancel_batch = False
+        self._set_log_expanded(True)
         self._set_controls_enabled(False)
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
@@ -1485,6 +1603,7 @@ class FastConvertWindow(QWidget):
         self.cancel_btn.setEnabled(False)
         self.eta_label.setVisible(False)
         self._apply_mode_state()
+        self._update_log_header()
 
     def showEvent(self, event: Any) -> None:
         super().showEvent(event)
