@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Fast Convert / 闪电转换 - 轻量独立的 MP4 视频转码、压缩与重封装工具。
+"""Fast Convert / 闪电转换 - 轻量独立的 MP4 修复与压缩工具。
 
 @author Gemini 3.8 Flash @date 2026-09-03
 """
@@ -26,7 +26,7 @@ try:
 except ImportError:
     psutil = None  # type: ignore[assignment]
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -56,15 +57,270 @@ APP_NAME_EN = "Fast Convert"
 APP_NAME_ZH = "闪电转换"
 APP_VERSION = "1.1.2"
 
-VIDEO_EXTS = ("rmvb", "flv", "avi", "mkv", "mov", "wmv", "ts", "webm", "m4v", "mpeg", "mpg", "3gp", "vob")
+VIDEO_EXTS = (
+    "mp4", "m4v", "mov", "mkv", "avi", "wmv", "flv",
+    "webm", "ts", "m2ts", "mts", "mpeg", "mpg", "vob",
+    "3gp", "rm", "rmvb", "asf",
+)
+
+
+def is_video_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lstrip(".").lower() in VIDEO_EXTS
+
+
+def qurl_to_path(url: QUrl) -> Path | None:
+    """把拖放 URL 转成本地路径。兼容 Windows 上 file:///D:/... 的写法。"""
+    local = url.toLocalFile().strip()
+    if local:
+        return Path(local)
+    if url.scheme().lower() != "file":
+        return None
+    raw = url.path().strip()
+    if len(raw) >= 3 and raw[0] == "/" and raw[2] == ":":
+        raw = raw[1:]
+    return Path(raw) if raw else None
+
+
+def paths_from_mime(mime: Any) -> list[Path]:
+    paths: list[Path] = []
+    if mime.hasUrls():
+        for url in mime.urls():
+            path = qurl_to_path(url)
+            if path is not None:
+                paths.append(path)
+    if paths:
+        return paths
+    if not mime.hasText():
+        return paths
+    for line in mime.text().splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        if text.lower().startswith("file:"):
+            path = qurl_to_path(QUrl(text))
+        else:
+            path = Path(text)
+        if path is not None and str(path):
+            paths.append(path)
+    return paths
+
+
 VIDEO_SCALE_KEYS = ["orig", "p75", "p50", "1080", "720", "480"]
 # 精简为三档梯级清晰的速度预设：快速(推荐)、标准、高质量
 VIDEO_PRESET_KEYS = ["veryfast", "fast", "medium"]
-VIDEO_MODES = ["convert", "compress", "remux"]
+VIDEO_MODES = ["convert", "compress", "repair"]
+
+
+def normalize_mode(mode: str) -> str:
+    """旧配置里的重封并入修复；未知值回到转换。"""
+    if mode == "remux":
+        return "repair"
+    return mode if mode in VIDEO_MODES else "convert"
 
 DURATION_REGEX = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 TIME_REGEX = re.compile(r"time=\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 SPEED_REGEX = re.compile(r"speed=\s*([\d\.]+)x")
+
+# MP4 封装器能直接打标签的编码。rv40 / cook 等不在此列，流复制会在写头时失败。
+MP4_COPY_VIDEO = frozenset({
+    "h264", "hevc", "mpeg4", "av1", "vp9", "mjpeg",
+    "mpeg1video", "mpeg2video", "h263", "h263p",
+})
+MP4_COPY_AUDIO = frozenset({
+    "aac", "mp3", "ac3", "eac3", "mp2", "alac", "flac", "opus",
+    "dca", "amr_nb", "amr_wb",
+})
+EVEN_DIMENSIONS_VF = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+_MUX_REJECT_MARKERS = (
+    "not currently supported in container",
+    "could not find tag for codec",
+    "incorrect codec parameters",
+)
+
+
+@dataclass(frozen=True)
+class RemuxProbe:
+    """一次重封前的编码探测结果。known 为 False 表示没探到，先走流复制。"""
+
+    known: bool
+    has_video: bool
+    has_audio: bool
+    copy_video: bool
+    copy_audio: bool
+    video_codecs: tuple[str, ...]
+    audio_codecs: tuple[str, ...]
+
+    @staticmethod
+    def unknown() -> RemuxProbe:
+        return RemuxProbe(False, False, False, True, True, (), ())
+
+    def needs_transcode(self) -> bool:
+        if not self.known:
+            return False
+        if self.has_video and not self.copy_video:
+            return True
+        if self.has_audio and not self.copy_audio:
+            return True
+        return False
+
+
+def locate_ffprobe(ffmpeg: Path) -> Path | None:
+    """优先用与 ffmpeg 同目录的 ffprobe，否则再查 PATH。"""
+    name = "ffprobe.exe" if ffmpeg.name.lower().endswith(".exe") else "ffprobe"
+    sibling = ffmpeg.with_name(name)
+    if sibling.is_file():
+        return sibling
+    found = shutil.which("ffprobe")
+    return Path(found) if found else None
+
+
+def _unique_names(names: list[str]) -> tuple[str, ...]:
+    seen: list[str] = []
+    for name in names:
+        if name not in seen:
+            seen.append(name)
+    return tuple(seen)
+
+
+def read_ffprobe_streams(ffprobe: Path, src: Path) -> list[dict[str, Any]] | None:
+    """读取音视频流编码。失败返回 None，由调用方改走流复制再按需回退。"""
+    cmd = [
+        str(ffprobe),
+        "-v", "error",
+        "-show_entries", "stream=codec_type,codec_name,disposition",
+        "-of", "json",
+        str(src),
+    ]
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=45,
+            creationflags=creationflags,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return None
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    streams = payload.get("streams") if isinstance(payload, dict) else None
+    if not isinstance(streams, list):
+        return None
+    return [item for item in streams if isinstance(item, dict)]
+
+
+def probe_remux(ffprobe: Path | None, src: Path) -> RemuxProbe:
+    """判断音视频能否原样写入 MP4。封面图不参与判断。"""
+    if ffprobe is None:
+        return RemuxProbe.unknown()
+    raw = read_ffprobe_streams(ffprobe, src)
+    if raw is None:
+        return RemuxProbe.unknown()
+
+    videos: list[str] = []
+    audios: list[str] = []
+    for item in raw:
+        disposition = item.get("disposition")
+        if isinstance(disposition, dict) and disposition.get("attached_pic"):
+            continue
+        kind = str(item.get("codec_type") or "")
+        name = str(item.get("codec_name") or "unknown").lower()
+        if kind == "video":
+            videos.append(name)
+        elif kind == "audio":
+            audios.append(name)
+
+    video_codecs = _unique_names(videos)
+    audio_codecs = _unique_names(audios)
+    return RemuxProbe(
+        known=True,
+        has_video=bool(video_codecs),
+        has_audio=bool(audio_codecs),
+        copy_video=all(name in MP4_COPY_VIDEO for name in video_codecs),
+        copy_audio=all(name in MP4_COPY_AUDIO for name in audio_codecs),
+        video_codecs=video_codecs,
+        audio_codecs=audio_codecs,
+    )
+
+
+def format_remux_reason(probe: RemuxProbe) -> str:
+    parts: list[str] = []
+    if probe.has_video and not probe.copy_video:
+        codecs = "/".join(probe.video_codecs) or "unknown"
+        parts.append(t("log_remux_part_video", codecs=codecs))
+    if probe.has_audio and not probe.copy_audio:
+        codecs = "/".join(probe.audio_codecs) or "unknown"
+        parts.append(t("log_remux_part_audio", codecs=codecs))
+    if not parts:
+        return t("log_remux_part_unknown")
+    sep = "，" if get_i18n().current_language == "zh_CN" else ", "
+    return sep.join(parts)
+
+
+def muxer_rejected_output(lines: list[str]) -> bool:
+    blob = "\n".join(lines).lower()
+    return any(marker in blob for marker in _MUX_REJECT_MARKERS)
+
+
+def build_remux_transcode_args(
+    probe: RemuxProbe,
+    *,
+    crf: int,
+    preset: str,
+    threads: int,
+    dst: Path,
+    force: bool,
+    vf: str | None = None,
+) -> list[str]:
+    """生成修复时的转码参数。force 时音视频都转码；否则只转不能写入 MP4 的那一路。"""
+    if probe.known:
+        has_video = probe.has_video
+        has_audio = probe.has_audio
+        copy_video = probe.copy_video and not force
+        copy_audio = probe.copy_audio and not force
+    else:
+        has_video = True
+        has_audio = True
+        copy_video = False
+        copy_audio = False
+
+    args: list[str] = []
+    if probe.known:
+        if has_video:
+            args += ["-map", "0:v:0"]
+        if has_audio:
+            args += ["-map", "0:a"]
+    else:
+        args += ["-map", "0:v:0?", "-map", "0:a?"]
+    args += ["-dn", "-sn"]
+
+    if has_video:
+        if copy_video:
+            args += ["-c:v", "copy"]
+        else:
+            args += [
+                "-c:v", "libx264",
+                "-crf", str(crf),
+                "-preset", preset,
+                "-threads", str(threads),
+                "-vf", vf or EVEN_DIMENSIONS_VF,
+                "-pix_fmt", "yuv420p",
+            ]
+    if has_audio:
+        if copy_audio:
+            args += ["-c:a", "copy"]
+        else:
+            args += ["-c:a", "aac", "-b:a", "192k"]
+    args += ["-movflags", "+faststart", str(dst)]
+    return args
 
 
 def app_base_dir() -> Path:
@@ -558,6 +814,10 @@ class VideoDropZone(QFrame):
         self.sub_label.setStyleSheet("color:#9CA3AF; font-size:11px; background:transparent;")
         layout.addWidget(self.sub_label)
 
+        # 图标和文案不吃鼠标，否则拖到文字上父控件收不到 drop
+        for widget in (self.mark_label, self.title_label, self.sub_label):
+            widget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
         self.clear_btn = QPushButton()
         self.clear_btn.setObjectName("dropClear")
         self.clear_btn.setCursor(Qt.PointingHandCursor)
@@ -572,6 +832,7 @@ class VideoDropZone(QFrame):
         """)
         self.clear_btn.clicked.connect(self.clearRequested.emit)
         self.clear_btn.setVisible(False)
+        self.clear_btn.installEventFilter(self)
         layout.addWidget(self.clear_btn, 0, Qt.AlignHCenter)
 
         self.retranslate()
@@ -639,14 +900,34 @@ class VideoDropZone(QFrame):
         painter.setPen(pen)
         painter.drawPath(path)
 
-    def dragEnterEvent(self, event: Any) -> None:
+    def eventFilter(self, obj: Any, event: Any) -> bool:
+        if obj is self.clear_btn and event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop):
+            if event.type() == QEvent.Type.DragEnter:
+                self.dragEnterEvent(event)
+            elif event.type() == QEvent.Type.DragMove:
+                self.dragMoveEvent(event)
+            else:
+                self.dropEvent(event)
+            return True
+        return super().eventFilter(obj, event)
+
+    def _accept_file_drag(self, event: Any) -> bool:
         if self._busy or not event.mimeData().hasUrls():
             event.ignore()
+            return False
+        event.acceptProposedAction()
+        return True
+
+    def dragEnterEvent(self, event: Any) -> None:
+        if not self._accept_file_drag(event):
             return
         self._dragging = True
         self.retranslate()
         self.update()
-        event.acceptProposedAction()
+
+    def dragMoveEvent(self, event: Any) -> None:
+        # Windows 上不接受 dragMove，drop 不会送达
+        self._accept_file_drag(event)
 
     def dragLeaveEvent(self, event: Any) -> None:
         self._dragging = False
@@ -656,15 +937,12 @@ class VideoDropZone(QFrame):
 
     def dropEvent(self, event: Any) -> None:
         self._dragging = False
-        if self._busy or not event.mimeData().hasUrls():
-            event.ignore()
-            return
-        paths = [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
         self.retranslate()
         self.update()
-        if paths:
-            self.filesDropped.emit(paths)
-            event.acceptProposedAction()
+        if not self._accept_file_drag(event):
+            return
+        paths = paths_from_mime(event.mimeData())
+        self.filesDropped.emit(paths)
 
     def mousePressEvent(self, event: Any) -> None:
         if event.button() == Qt.LeftButton and not self._busy:
@@ -672,6 +950,126 @@ class VideoDropZone(QFrame):
                 self.pickRequested.emit()
                 return
         super().mousePressEvent(event)
+
+
+class ToastBanner(QFrame):
+    """主窗口底部的轻提示。不抢焦点，新提示会打断上一条。"""
+
+    _COLORS = {
+        "success": ("#ECFDF5", "#A7F3D0", "#065F46"),
+        "warning": ("#FFFBEB", "#FDE68A", "#92400E"),
+        "info": ("#EFF6FF", "#BFDBFE", "#1E3A8A"),
+        "error": ("#FEF2F2", "#FECACA", "#991B1B"),
+    }
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("toastBanner")
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.hide()
+
+        self._label = QLabel()
+        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setWordWrap(True)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 8, 14, 8)
+        layout.addWidget(self._label)
+
+        self._effect = QGraphicsOpacityEffect(self)
+        self._effect.setOpacity(0.0)
+        self.setGraphicsEffect(self._effect)
+
+        self._fade = QPropertyAnimation(self._effect, b"opacity", self)
+        self._fade.setEasingCurve(QEasingCurve.OutCubic)
+        self._fade.finished.connect(self._on_fade_finished)
+        self._slide = QPropertyAnimation(self, b"pos", self)
+        self._slide.setEasingCurve(QEasingCurve.OutCubic)
+
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.timeout.connect(self._start_exit)
+        self._hiding = False
+        self._home = QPoint(0, 0)
+
+    def show_message(self, text: str, level: str = "info") -> None:
+        bg, border, fg = self._COLORS.get(level, self._COLORS["info"])
+        self.setStyleSheet(
+            "QFrame#toastBanner {"
+            f"background:{bg}; border:1px solid {border}; border-radius:8px;"
+            "}"
+            "QLabel {"
+            f"color:{fg}; background:transparent; font-size:13px; font-weight:500;"
+            "}"
+        )
+        self._label.setText(text)
+        self._fit_text()
+        self._hiding = False
+        self._hide_timer.stop()
+        self._fade.stop()
+        self._slide.stop()
+        self._place()
+        start = self._home + QPoint(0, 8)
+        self.move(start)
+        self._effect.setOpacity(0.0)
+        self.show()
+        self.raise_()
+
+        self._fade.setDuration(180)
+        self._fade.setStartValue(0.0)
+        self._fade.setEndValue(1.0)
+        self._slide.setDuration(180)
+        self._slide.setStartValue(start)
+        self._slide.setEndValue(self._home)
+        self._fade.start()
+        self._slide.start()
+        self._hide_timer.start(2600)
+
+    def reposition(self) -> None:
+        if not self.isVisible() or self._slide.state() == QAbstractAnimation.State.Running:
+            return
+        self._place()
+        self.move(self._home)
+
+    def _fit_text(self) -> None:
+        text_w = self._label.fontMetrics().horizontalAdvance(self._label.text())
+        width = min(440, max(180, text_w + 28))
+        self.setFixedWidth(width)
+        self._label.setWordWrap(text_w + 28 > 440)
+        self._label.setFixedWidth(width - 28)
+        self._label.adjustSize()
+        if self.layout() is not None:
+            self.layout().activate()
+        self.setFixedHeight(max(36, self.sizeHint().height()))
+
+    def _place(self) -> None:
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        anchor = parent.log_toggle_btn.mapTo(parent, QPoint(0, 0))
+        x = max(16, (parent.width() - self.width()) // 2)
+        y = anchor.y() - self.height() - 10
+        self._home = QPoint(x, max(12, y))
+
+    def _start_exit(self) -> None:
+        if not self.isVisible():
+            return
+        self._hiding = True
+        end = self._home + QPoint(0, 6)
+        self._fade.stop()
+        self._slide.stop()
+        self._fade.setDuration(160)
+        self._fade.setStartValue(float(self._effect.opacity()))
+        self._fade.setEndValue(0.0)
+        self._slide.setDuration(160)
+        self._slide.setStartValue(self.pos())
+        self._slide.setEndValue(end)
+        self._fade.start()
+        self._slide.start()
+
+    def _on_fade_finished(self) -> None:
+        if self._hiding and float(self._effect.opacity()) <= 0.01:
+            self.hide()
+            self._hiding = False
 
 
 class FastConvertWindow(QWidget):
@@ -747,6 +1145,8 @@ class FastConvertWindow(QWidget):
         self.dir_label.setFixedWidth(60)
 
         self.dir_edit = QLineEdit(str(self.working_dir))
+        self.dir_edit.setAcceptDrops(False)
+        self.dir_edit.installEventFilter(self)
         self.dir_edit.editingFinished.connect(self._on_dir_edited)
 
         self.browse_btn = QPushButton()
@@ -790,9 +1190,7 @@ class FastConvertWindow(QWidget):
         seg_layout.setContentsMargins(0, 0, 0, 0)
         seg_layout.setSpacing(0)
 
-        saved_mode = str(self.config.get("last_video_mode") or "convert")
-        if saved_mode not in VIDEO_MODES:
-            saved_mode = "convert"
+        saved_mode = normalize_mode(str(self.config.get("last_video_mode") or "convert"))
 
         self._mode_buttons: dict[str, QPushButton] = {}
         for index, key in enumerate(VIDEO_MODES):
@@ -908,6 +1306,8 @@ class FastConvertWindow(QWidget):
         self.log = QPlainTextEdit()
         self.log.setObjectName("logView")
         self.log.setReadOnly(True)
+        self.log.setAcceptDrops(False)
+        self.log.installEventFilter(self)
         self.log.setMinimumHeight(0)
         self.log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         root.addWidget(self.log, 2)
@@ -949,6 +1349,9 @@ class FastConvertWindow(QWidget):
         bottom_row.addWidget(self.cancel_btn)
         bottom_row.addWidget(self.close_btn)
         root.addLayout(bottom_row)
+
+        self.toast = ToastBanner(self)
+        self.setAcceptDrops(True)
 
     def _saved_int(self, key: str, default: int, lo: int, hi: int) -> int:
         try:
@@ -1044,7 +1447,7 @@ class FastConvertWindow(QWidget):
         # 工作模式分段按钮
         self._mode_buttons["convert"].setText(t("mode_convert"))
         self._mode_buttons["compress"].setText(t("mode_compress"))
-        self._mode_buttons["remux"].setText(t("mode_remux"))
+        self._mode_buttons["repair"].setText(t("mode_repair"))
 
         self.crf_label.setText(t("crf"))
         self.scale_label.setText(t("scale"))
@@ -1089,23 +1492,19 @@ class FastConvertWindow(QWidget):
 
     def _apply_mode_state(self) -> None:
         mode = self._current_mode()
-        remux = (mode == "remux")
-        enable_quality = (not remux) and (not self._busy)
+        enable_quality = not self._busy
 
         self.crf_spin.setEnabled(enable_quality)
         self.scale_combo.setEnabled(enable_quality)
         self.preset_combo.setEnabled(enable_quality)
 
         self.mode_hint.setText(t(f"hint_{mode}"))
-        if remux:
-            self.param_hint.setText(t("param_remux"))
-            self.start_btn.setText(t("btn_start_remux"))
-        elif mode == "compress":
+        if mode in ("convert", "compress"):
             self.param_hint.setText(t("param_crf"))
-            self.start_btn.setText(t("btn_start_compress"))
+            self.start_btn.setText(t(f"btn_start_{mode}"))
         else:
-            self.param_hint.setText(t("param_crf"))
-            self.start_btn.setText(t("btn_start_convert"))
+            self.param_hint.setText(t("param_repair"))
+            self.start_btn.setText(t("btn_start_repair"))
 
         self.start_btn.setEnabled(not self._busy)
 
@@ -1150,8 +1549,71 @@ class FastConvertWindow(QWidget):
         if files:
             self._on_paths_dropped([Path(f) for f in files])
 
+    def eventFilter(self, obj: Any, event: Any) -> bool:
+        # 路径框和日志默认会吃掉拖放，转给主窗口才能改目录并弹出提示
+        if obj in (getattr(self, "dir_edit", None), getattr(self, "log", None)):
+            et = event.type()
+            if et == QEvent.Type.DragEnter:
+                self.dragEnterEvent(event)
+                return True
+            if et == QEvent.Type.DragMove:
+                self.dragMoveEvent(event)
+                return True
+            if et == QEvent.Type.Drop:
+                self.dropEvent(event)
+                return True
+        return super().eventFilter(obj, event)
+
+    def _accept_file_drag(self, event: Any) -> bool:
+        if self._busy or not event.mimeData().hasUrls():
+            event.ignore()
+            return False
+        event.acceptProposedAction()
+        return True
+
+    def dragEnterEvent(self, event: Any) -> None:
+        self._accept_file_drag(event)
+
+    def dragMoveEvent(self, event: Any) -> None:
+        self._accept_file_drag(event)
+
+    def dropEvent(self, event: Any) -> None:
+        if not self._accept_file_drag(event):
+            return
+        self._on_paths_dropped(paths_from_mime(event.mimeData()))
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "toast"):
+            self.toast.reposition()
+
+    def show_toast(self, text: str, level: str = "info") -> None:
+        if hasattr(self, "toast"):
+            self.toast.show_message(text, level)
+
+    def _toast_directory(self, directory: Path) -> None:
+        pending = self._scan_files(directory, self._current_mode())
+        name = directory.name or str(directory)
+        if pending:
+            self.show_toast(t("toast_dir_ready", name=name, count=len(pending)), "success")
+            self.write_log(t("log_dir_ready", path=str(directory), count=len(pending)))
+        else:
+            self.show_toast(t("toast_dir_empty", name=name), "info")
+            self.write_log(t("log_dir_empty", path=str(directory)))
+
     def _on_paths_dropped(self, paths: list[Path]) -> None:
-        if not paths or self._busy:
+        if self._busy:
+            return
+        if not paths:
+            self.show_toast(t("toast_not_video"), "warning")
+            self.write_log(t("log_not_video"))
+            return
+
+        # 只拖入目录：切换工作目录，交给当前模式自己扫描，避免把无关文件塞进列表
+        if all(p.is_dir() for p in paths):
+            target = paths[0]
+            self._apply_working_dir(target, clear_manual=True)
+            self._toast_directory(target)
             return
 
         collected: list[Path] = []
@@ -1162,23 +1624,26 @@ class FastConvertWindow(QWidget):
             if p.is_dir():
                 if inferred_dir is None:
                     inferred_dir = p
-                for sub in p.rglob("*"):
-                    if sub.is_file():
-                        if sub.suffix.lstrip(".").lower() in VIDEO_EXTS:
-                            collected.append(sub)
-                        else:
-                            ignored += 1
-            elif p.is_file():
+                try:
+                    children = list(p.iterdir())
+                except OSError as exc:
+                    self.write_log(f"扫描目录出错: {exc}")
+                    continue
+                for sub in children:
+                    if is_video_file(sub):
+                        collected.append(sub)
+                    elif sub.is_file():
+                        ignored += 1
+            elif is_video_file(p):
                 if inferred_dir is None:
                     inferred_dir = p.parent
-                if p.suffix.lstrip(".").lower() in VIDEO_EXTS:
-                    collected.append(p)
-                else:
-                    ignored += 1
+                collected.append(p)
+            else:
+                ignored += 1
 
         if not collected:
-            if len(paths) == 1 and paths[0].is_dir():
-                self._apply_working_dir(paths[0], clear_manual=True)
+            self.show_toast(t("toast_not_video"), "warning")
+            self.write_log(t("log_not_video"))
             return
 
         before = set(self._manual_files or [])
@@ -1197,6 +1662,13 @@ class FastConvertWindow(QWidget):
         if merged:
             target_dir = inferred_dir if (inferred_dir and inferred_dir.is_dir()) else merged[0].parent
             self._apply_working_dir(target_dir, clear_manual=False)
+
+        if added == 0:
+            self.show_toast(t("toast_already"), "info")
+        elif ignored:
+            self.show_toast(t("toast_added_ignored", added=added, ignored=ignored), "success")
+        else:
+            self.show_toast(t("toast_added", added=added), "success")
 
         extra = t("log_ignored_files", ignored=ignored) if ignored else ""
         self.write_log(t("log_added_files", added=added, total=len(merged), extra=extra))
@@ -1381,9 +1853,10 @@ class FastConvertWindow(QWidget):
             for item in workdir.iterdir():
                 if item.is_file():
                     ext = item.suffix.lstrip(".").lower()
-                    if mode in ("compress", "remux") and ext == "mp4":
-                        results.append(item)
-                    elif mode == "convert" and ext in VIDEO_EXTS and ext != "mp4":
+                    # 转换模式扫目录时跳过已经是 MP4 的文件；手动拖入的不受影响
+                    if mode == "convert" and ext == "mp4":
+                        continue
+                    if ext in VIDEO_EXTS:
                         results.append(item)
         except Exception as exc:
             self.write_log(f"扫描目录出错: {exc}")
@@ -1446,6 +1919,7 @@ class FastConvertWindow(QWidget):
 
         success_count = 0
         fail_count = 0
+        ffprobe = locate_ffprobe(self.runtime.ffmpeg)
 
         def _scale_filter(scale_key: str) -> str | None:
             if scale_key in ("", "orig"):
@@ -1464,16 +1938,45 @@ class FastConvertWindow(QWidget):
             if self._cancel_batch:
                 break
             dst = outdir / f"{src.stem}.mp4"
-            if mode == "compress" and src.resolve() == dst.resolve():
+            if mode in ("convert", "compress") and src.resolve() == dst.resolve():
                 dst = outdir / f"{src.stem}_compressed.mp4"
 
             self.log_signal.emit(f"\n[{idx}/{len(files)}] {src.name} -> {dst.name}")
-            cmd = [str(self.runtime.ffmpeg), "-y", "-ignore_unknown", "-i", str(src)]
+            base_cmd = [str(self.runtime.ffmpeg), "-y", "-ignore_unknown", "-i", str(src)]
 
-            if mode == "remux":
-                cmd += ["-c", "copy", "-movflags", "+faststart", str(dst)]
+            if mode == "repair":
+                rc = self._repair_one(
+                    base_cmd,
+                    src,
+                    dst,
+                    workdir,
+                    file_index=idx,
+                    total_files=len(files),
+                    crf=crf,
+                    preset=preset,
+                    threads=threads,
+                    vf=_scale_filter(scale),
+                    ffprobe=ffprobe,
+                )
+            elif mode == "convert":
+                cmd = base_cmd + build_remux_transcode_args(
+                    RemuxProbe.unknown(),
+                    crf=crf,
+                    preset=preset,
+                    threads=threads,
+                    dst=dst,
+                    force=True,
+                    vf=_scale_filter(scale),
+                )
+                rc = self._execute_ffmpeg(
+                    cmd,
+                    workdir,
+                    file_index=idx,
+                    total_files=len(files),
+                    src_name=src.name,
+                )
             else:
-                cmd += [
+                cmd = base_cmd + [
                     "-c:v", "libx264",
                     "-crf", str(crf),
                     "-preset", preset,
@@ -1488,17 +1991,18 @@ class FastConvertWindow(QWidget):
                     "-movflags", "+faststart",
                     str(dst),
                 ]
+                rc = self._execute_ffmpeg(
+                    cmd,
+                    workdir,
+                    file_index=idx,
+                    total_files=len(files),
+                    src_name=src.name,
+                )
 
-            rc = self._execute_ffmpeg(
-                cmd,
-                workdir,
-                file_index=idx,
-                total_files=len(files),
-                src_name=src.name,
-            )
             if rc == 0:
                 success_count += 1
             else:
+                self._discard_partial(dst, src)
                 fail_count += 1
                 if self._cancel_batch:
                     break
@@ -1513,6 +2017,95 @@ class FastConvertWindow(QWidget):
             self.log_highlight_signal.emit(t("log_batch_done", s=success_count, f=fail_count, elapsed=elapsed_str), level)
         self.done_signal.emit()
 
+    def _repair_one(
+        self,
+        base_cmd: list[str],
+        src: Path,
+        dst: Path,
+        workdir: Path,
+        *,
+        file_index: int,
+        total_files: int,
+        crf: int,
+        preset: str,
+        threads: int,
+        vf: str | None,
+        ffprobe: Path | None,
+    ) -> int:
+        """能写入 MP4 就只封装；否则按当前画质参数转码。"""
+        probe = probe_remux(ffprobe, src)
+        if probe.needs_transcode():
+            self.log_highlight_signal.emit(
+                t(
+                    "log_repair_reencode",
+                    reason=format_remux_reason(probe),
+                    crf=crf,
+                    preset=preset,
+                ),
+                "warning",
+            )
+            cmd = base_cmd + build_remux_transcode_args(
+                probe,
+                crf=crf,
+                preset=preset,
+                threads=threads,
+                dst=dst,
+                force=False,
+                vf=vf,
+            )
+            return self._execute_ffmpeg(
+                cmd,
+                workdir,
+                file_index=file_index,
+                total_files=total_files,
+                src_name=src.name,
+            )
+
+        self.log_signal.emit(t("log_repair_copy"))
+        tail: list[str] = []
+        rc = self._execute_ffmpeg(
+            base_cmd + ["-c", "copy", "-movflags", "+faststart", str(dst)],
+            workdir,
+            file_index=file_index,
+            total_files=total_files,
+            src_name=src.name,
+            output_tail=tail,
+        )
+        if rc == 0 or self._cancel_batch or not muxer_rejected_output(tail):
+            return rc
+
+        self._discard_partial(dst, src)
+        self.log_highlight_signal.emit(
+            t("log_repair_copy_failed", crf=crf, preset=preset),
+            "warning",
+        )
+        cmd = base_cmd + build_remux_transcode_args(
+            probe,
+            crf=crf,
+            preset=preset,
+            threads=threads,
+            dst=dst,
+            force=True,
+            vf=vf,
+        )
+        return self._execute_ffmpeg(
+            cmd,
+            workdir,
+            file_index=file_index,
+            total_files=total_files,
+            src_name=src.name,
+        )
+
+    def _discard_partial(self, dst: Path, src: Path) -> None:
+        """删掉失败或取消留下的半成品，避免被当成转换结果。"""
+        try:
+            if dst.resolve() == src.resolve():
+                return
+            if dst.is_file():
+                dst.unlink()
+        except OSError as exc:
+            self.logger.warning("删除未完成文件失败 %s: %s", dst, exc)
+
     def _execute_ffmpeg(
         self,
         cmd: list[str],
@@ -1521,6 +2114,7 @@ class FastConvertWindow(QWidget):
         file_index: int = 1,
         total_files: int = 1,
         src_name: str = "",
+        output_tail: list[str] | None = None,
     ) -> int:
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         with self._proc_lock:
@@ -1546,6 +2140,10 @@ class FastConvertWindow(QWidget):
                     line_str = line.rstrip()
                     if line_str:
                         self.log_signal.emit(line_str)
+                        if output_tail is not None:
+                            output_tail.append(line_str)
+                            if len(output_tail) > 80:
+                                del output_tail[:-80]
 
                         # 1. 探测输入文件的总时长
                         if total_duration <= 0.0:
