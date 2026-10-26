@@ -68,6 +68,19 @@ def is_video_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lstrip(".").lower() in VIDEO_EXTS
 
 
+def same_directory(left: Path, right: Path) -> bool:
+    """忽略斜杠和大小写差异，判断两个路径是不是同一个目录。"""
+    return os.path.normcase(os.path.normpath(str(left))) == os.path.normcase(os.path.normpath(str(right)))
+
+
+def path_inside(child: Path, directory: Path) -> bool:
+    """child 是否位于 directory 之中（不含 directory 自身）。"""
+    child_norm = os.path.normcase(os.path.normpath(str(child)))
+    dir_norm = os.path.normcase(os.path.normpath(str(directory)))
+    prefix = dir_norm if dir_norm.endswith(os.sep) else dir_norm + os.sep
+    return child_norm.startswith(prefix)
+
+
 def qurl_to_path(url: QUrl) -> Path | None:
     """把拖放 URL 转成本地路径。兼容 Windows 上 file:///D:/... 的写法。"""
     local = url.toLocalFile().strip()
@@ -1509,13 +1522,18 @@ class FastConvertWindow(QWidget):
         self.start_btn.setEnabled(not self._busy)
 
     def _on_dir_edited(self) -> None:
+        # 路径框失焦也会发 editingFinished。文本没变时不能清掉刚拖入的文件，
+        # 否则点「开始」会退回去扫描整个目录。
         path = self._resolved_dir()
-        if path:
-            self._apply_working_dir(path, clear_manual=True)
+        if path is None or same_directory(path, self.working_dir):
+            return
+        self._apply_working_dir(path, clear_manual=True)
 
     def _apply_working_dir(self, directory: Path, *, clear_manual: bool) -> None:
         self.working_dir = directory
+        self.dir_edit.blockSignals(True)
         self.dir_edit.setText(str(directory))
+        self.dir_edit.blockSignals(False)
         if clear_manual:
             self._manual_files = None
             self.drop_zone.set_files([])
@@ -1609,37 +1627,39 @@ class FastConvertWindow(QWidget):
             self.write_log(t("log_not_video"))
             return
 
-        # 只拖入目录：切换工作目录，交给当前模式自己扫描，避免把无关文件塞进列表
-        if all(p.is_dir() for p in paths):
-            target = paths[0]
+        directories = [p for p in paths if p.is_dir()]
+        videos = [p for p in paths if is_video_file(p)]
+        ignored = sum(1 for p in paths if not p.is_dir() and not is_video_file(p))
+        # 资源管理器拖单个文件时，有时会把父目录一起带上来。那不是用户要扫整个目录。
+        explicit_dirs = [
+            directory
+            for directory in directories
+            if not any(path_inside(video, directory) for video in videos)
+        ]
+
+        # 只有拖入文件夹或目录路径时，才切换工作目录并在开始时扫描。
+        if not videos and directories:
+            target = directories[0]
             self._apply_working_dir(target, clear_manual=True)
             self._toast_directory(target)
             return
 
-        collected: list[Path] = []
-        ignored = 0
-        inferred_dir: Path | None = None
+        collected: list[Path] = list(videos)
+        inferred_dir: Path | None = videos[0].parent if videos else None
 
-        for p in paths:
-            if p.is_dir():
-                if inferred_dir is None:
-                    inferred_dir = p
-                try:
-                    children = list(p.iterdir())
-                except OSError as exc:
-                    self.write_log(f"扫描目录出错: {exc}")
-                    continue
-                for sub in children:
-                    if is_video_file(sub):
-                        collected.append(sub)
-                    elif sub.is_file():
-                        ignored += 1
-            elif is_video_file(p):
-                if inferred_dir is None:
-                    inferred_dir = p.parent
-                collected.append(p)
-            else:
-                ignored += 1
+        for directory in explicit_dirs:
+            if inferred_dir is None:
+                inferred_dir = directory
+            try:
+                children = list(directory.iterdir())
+            except OSError as exc:
+                self.write_log(f"扫描目录出错: {exc}")
+                continue
+            for sub in children:
+                if is_video_file(sub):
+                    collected.append(sub)
+                elif sub.is_file():
+                    ignored += 1
 
         if not collected:
             self.show_toast(t("toast_not_video"), "warning")
@@ -1658,7 +1678,7 @@ class FastConvertWindow(QWidget):
         self._manual_files = merged
         self.drop_zone.set_files(merged)
 
-        # 核心：无论之前是什么目录，自动切换为添加的第一个文件所在目录并持久化保存
+        # 输出仍放到首个文件所在目录的 converted；不清空手动列表，避免开始时改扫整个目录。
         if merged:
             target_dir = inferred_dir if (inferred_dir and inferred_dir.is_dir()) else merged[0].parent
             self._apply_working_dir(target_dir, clear_manual=False)
@@ -1814,7 +1834,8 @@ class FastConvertWindow(QWidget):
             return
 
         mode = self._current_mode()
-        files = self._manual_files or self._scan_files(workdir, mode)
+        # 拖入或点选的文件只处理这些文件；没有手动列表时才扫描工作目录。
+        files = list(self._manual_files) if self._manual_files else self._scan_files(workdir, mode)
         if not files:
             self._set_log_expanded(True)
             self.write_log(t("log_no_videos"))
