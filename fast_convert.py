@@ -1116,6 +1116,7 @@ class FastConvertWindow(QWidget):
         self._active_proc: subprocess.Popen[str] | None = None
         self._proc_lock = threading.Lock()
         self._cancel_batch = False
+        self._paused = False
         self._busy = False
         self._manual_files: list[Path] | None = None
 
@@ -1347,6 +1348,11 @@ class FastConvertWindow(QWidget):
         self.start_btn.setCursor(Qt.PointingHandCursor)
         self.start_btn.clicked.connect(self.start)
 
+        self.pause_btn = QPushButton()
+        self.pause_btn.setCursor(Qt.PointingHandCursor)
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.clicked.connect(self.toggle_pause)
+
         self.cancel_btn = QPushButton()
         self.cancel_btn.setObjectName("dangerButton")
         self.cancel_btn.setCursor(Qt.PointingHandCursor)
@@ -1359,6 +1365,7 @@ class FastConvertWindow(QWidget):
         self.close_btn.clicked.connect(self.close)
 
         bottom_row.addWidget(self.start_btn)
+        bottom_row.addWidget(self.pause_btn)
         bottom_row.addWidget(self.cancel_btn)
         bottom_row.addWidget(self.close_btn)
         root.addLayout(bottom_row)
@@ -1401,6 +1408,8 @@ class FastConvertWindow(QWidget):
 
         @author Gemini 3.8 Flash @date 2026-09-03
         """
+        if self._paused:
+            return
         eta_sec = data.get("eta_sec")
         pct = data.get("pct", 0.0)
         curr = data.get("curr", 1)
@@ -1491,6 +1500,7 @@ class FastConvertWindow(QWidget):
 
         self.cancel_btn.setText(t("btn_cancel"))
         self.close_btn.setText(t("btn_close"))
+        self._sync_pause_btn()
 
         self.drop_zone.retranslate()
         self._apply_mode_state()
@@ -1727,6 +1737,9 @@ class FastConvertWindow(QWidget):
             # 纯文案，避免部分中文字体缺箭头字形导致方框
             label = t("log_toggle_collapse")
             tip = t("log_toggle_collapse")
+        elif self._busy and self._paused:
+            label = t("log_collapsed_paused")
+            tip = t("log_toggle_expand")
         elif self._busy:
             label = t("log_collapsed_running")
             tip = t("log_toggle_expand")
@@ -1843,10 +1856,12 @@ class FastConvertWindow(QWidget):
 
         self._busy = True
         self._cancel_batch = False
+        self._paused = False
         self._set_log_expanded(True)
         self._set_controls_enabled(False)
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
+        self._sync_pause_btn()
         self.eta_label.setText(t("eta_estimating"))
         self.eta_label.setVisible(True)
 
@@ -1898,12 +1913,97 @@ class FastConvertWindow(QWidget):
             self.scale_combo.setEnabled(False)
             self.preset_combo.setEnabled(False)
 
+    def _sync_pause_btn(self) -> None:
+        if not hasattr(self, "pause_btn"):
+            return
+        if self._busy and self._paused:
+            self.pause_btn.setText(t("btn_resume"))
+            self.pause_btn.setEnabled(True)
+        elif self._busy:
+            self.pause_btn.setText(t("btn_pause"))
+            self.pause_btn.setEnabled(psutil is not None)
+        else:
+            self.pause_btn.setText(t("btn_pause"))
+            self.pause_btn.setEnabled(False)
+
+    def toggle_pause(self) -> None:
+        """暂停或继续当前批量任务（挂起 / 恢复 FFmpeg 进程）。"""
+        if not self._busy or self._cancel_batch:
+            return
+        if self._paused:
+            self._resume_batch()
+        else:
+            self._pause_batch()
+
+    def _pause_batch(self) -> None:
+        if psutil is None:
+            QMessageBox.warning(
+                self,
+                t("msg_pause_unavailable_title"),
+                t("msg_pause_unavailable_text"),
+            )
+            return
+        self._paused = True
+        self._suspend_active_proc()
+        self.write_log(t("log_paused"))
+        self.eta_label.setText(t("eta_paused"))
+        self.eta_label.setVisible(True)
+        self._sync_pause_btn()
+        self._update_log_header()
+
+    def _resume_batch(self) -> None:
+        self._paused = False
+        self._resume_active_proc()
+        self.write_log(t("log_resumed"))
+        self.eta_label.setText(t("eta_estimating"))
+        self.eta_label.setVisible(True)
+        self._sync_pause_btn()
+        self._update_log_header()
+
+    def _wait_while_paused(self) -> None:
+        while self._paused and not self._cancel_batch:
+            time.sleep(0.15)
+
+    def _suspend_active_proc(self) -> None:
+        if psutil is None:
+            return
+        with self._proc_lock:
+            proc = self._active_proc
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            psutil.Process(proc.pid).suspend()
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+            self.logger.warning("挂起 FFmpeg 进程失败: %s", exc)
+        except Exception as exc:
+            self.logger.warning("挂起 FFmpeg 进程失败: %s", exc)
+
+    def _resume_active_proc(self) -> None:
+        if psutil is None:
+            return
+        with self._proc_lock:
+            proc = self._active_proc
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            psutil.Process(proc.pid).resume()
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+            self.logger.warning("恢复 FFmpeg 进程失败: %s", exc)
+        except Exception as exc:
+            self.logger.warning("恢复 FFmpeg 进程失败: %s", exc)
+
     def cancel_batch(self) -> None:
         self._cancel_batch = True
+        was_paused = self._paused
+        self._paused = False
+        if was_paused:
+            self._resume_active_proc()
         self._stop_active_proc()
         self.write_log(t("log_cancelling"))
         self.cancel_btn.setEnabled(False)
+        self.pause_btn.setEnabled(False)
         self.eta_label.setVisible(False)
+        self._update_log_header()
 
     def _stop_active_proc(self) -> None:
         with self._proc_lock:
@@ -1956,6 +2056,9 @@ class FastConvertWindow(QWidget):
             return f"scale=-2:'trunc(min(ih,{h})/2)*2'"
 
         for idx, src in enumerate(files, 1):
+            if self._cancel_batch:
+                break
+            self._wait_while_paused()
             if self._cancel_batch:
                 break
             dst = outdir / f"{src.stem}.mp4"
@@ -2149,6 +2252,10 @@ class FastConvertWindow(QWidget):
             )
             proc = self._active_proc
 
+        # 若在文件间隙已点暂停，启动后立刻挂起，避免空窗跑起来
+        if self._paused and not self._cancel_batch:
+            self._suspend_active_proc()
+
         total_duration = 0.0
         start_real = time.time()
         last_emit_time = 0.0
@@ -2217,9 +2324,11 @@ class FastConvertWindow(QWidget):
 
     def _on_batch_done(self) -> None:
         self._busy = False
+        self._paused = False
         self._set_controls_enabled(True)
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
+        self._sync_pause_btn()
         self.eta_label.setVisible(False)
         self._apply_mode_state()
         self._update_log_header()
@@ -2236,7 +2345,11 @@ class FastConvertWindow(QWidget):
 
     def closeEvent(self, event: Any) -> None:
         self._perf_timer.stop()
+        was_paused = self._paused
         self._cancel_batch = True
+        self._paused = False
+        if was_paused:
+            self._resume_active_proc()
         self._stop_active_proc()
         super().closeEvent(event)
 
