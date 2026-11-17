@@ -144,6 +144,13 @@ MP4_COPY_AUDIO = frozenset({
     "dca", "amr_nb", "amr_wb",
 })
 EVEN_DIMENSIONS_VF = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+# 音频解码出错时 ffmpeg 每个包都会报错，一部长片能刷几十万行，同类行超过此数就不再显示
+LOG_REPEAT_LIMIT = 20
+LOG_VIEW_MAX_BLOCKS = 5000
+_LOG_REPEAT_KEY_REGEX = re.compile(r"@ (?:0x)?[0-9a-fA-F]+|\d+")
+# 音画时长差超过 max(5 秒, 视频时长 2%) 视为输出异常
+AV_MISMATCH_MIN_SEC = 5.0
+AV_MISMATCH_RATIO = 0.02
 _MUX_REJECT_MARKERS = (
     "not currently supported in container",
     "could not find tag for codec",
@@ -200,7 +207,7 @@ def read_ffprobe_streams(ffprobe: Path, src: Path) -> list[dict[str, Any]] | Non
     cmd = [
         str(ffprobe),
         "-v", "error",
-        "-show_entries", "stream=codec_type,codec_name,disposition",
+        "-show_entries", "stream=codec_type,codec_name,duration,disposition",
         "-of", "json",
         str(src),
     ]
@@ -262,6 +269,43 @@ def probe_remux(ffprobe: Path | None, src: Path) -> RemuxProbe:
         video_codecs=video_codecs,
         audio_codecs=audio_codecs,
     )
+
+
+def av_duration_mismatch(ffprobe: Path, dst: Path) -> tuple[float, float] | None:
+    """输出文件音画时长对不上时返回 (视频秒数, 音频秒数)，正常或读不到返回 None。
+
+    源文件音频中途损坏、换编码时 ffmpeg 会静默丢掉后面的音频且照常返回 0，只能靠事后比对发现。
+    """
+    raw = read_ffprobe_streams(ffprobe, dst)
+    if not raw:
+        return None
+    video: float | None = None
+    audio: float | None = None
+    for item in raw:
+        disposition = item.get("disposition")
+        if isinstance(disposition, dict) and disposition.get("attached_pic"):
+            continue
+        try:
+            duration = float(item.get("duration"))
+        except (TypeError, ValueError):
+            continue
+        kind = item.get("codec_type")
+        if kind == "video" and video is None:
+            video = duration
+        elif kind == "audio" and audio is None:
+            audio = duration
+    if video is None or audio is None or video <= 0:
+        return None
+    if abs(video - audio) <= max(AV_MISMATCH_MIN_SEC, video * AV_MISMATCH_RATIO):
+        return None
+    return video, audio
+
+
+def format_clock(seconds: float) -> str:
+    s = max(0, int(round(seconds)))
+    h, rem = divmod(s, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
 def format_remux_reason(probe: RemuxProbe) -> str:
@@ -1320,6 +1364,7 @@ class FastConvertWindow(QWidget):
         self.log = QPlainTextEdit()
         self.log.setObjectName("logView")
         self.log.setReadOnly(True)
+        self.log.setMaximumBlockCount(LOG_VIEW_MAX_BLOCKS)
         self.log.setAcceptDrops(False)
         self.log.installEventFilter(self)
         self.log.setMinimumHeight(0)
@@ -2033,6 +2078,28 @@ class FastConvertWindow(QWidget):
         preset: str,
         workdir: Path,
     ) -> None:
+        """后台线程入口。无论成功与否都要发 done_signal，否则界面会一直停在忙碌状态。"""
+        try:
+            self._process_batch(files, mode, crf, threads, scale, preset, workdir)
+        except Exception as exc:
+            self.logger.exception("批量任务异常中断")
+            self.log_highlight_signal.emit(
+                t("log_batch_crashed", error=f"{type(exc).__name__}: {exc}"),
+                "error",
+            )
+        finally:
+            self.done_signal.emit()
+
+    def _process_batch(
+        self,
+        files: list[Path],
+        mode: str,
+        crf: int,
+        threads: int,
+        scale: str,
+        preset: str,
+        workdir: Path,
+    ) -> None:
         outdir = workdir / "converted"
         outdir.mkdir(parents=True, exist_ok=True)
         self.log_signal.emit(t("log_batch_start", count=len(files)))
@@ -2040,6 +2107,7 @@ class FastConvertWindow(QWidget):
 
         success_count = 0
         fail_count = 0
+        warn_count = 0
         ffprobe = locate_ffprobe(self.runtime.ffmpeg)
 
         def _scale_filter(scale_key: str) -> str | None:
@@ -2125,6 +2193,8 @@ class FastConvertWindow(QWidget):
 
             if rc == 0:
                 success_count += 1
+                if self._warn_av_mismatch(ffprobe, dst):
+                    warn_count += 1
             else:
                 self._discard_partial(dst, src)
                 fail_count += 1
@@ -2137,9 +2207,29 @@ class FastConvertWindow(QWidget):
         if self._cancel_batch:
             self.log_highlight_signal.emit(t("log_cancelled", elapsed=elapsed_str), "warning")
         else:
-            level = "success" if fail_count == 0 else "error"
-            self.log_highlight_signal.emit(t("log_batch_done", s=success_count, f=fail_count, elapsed=elapsed_str), level)
-        self.done_signal.emit()
+            if fail_count:
+                level = "error"
+            elif warn_count:
+                level = "warning"
+            else:
+                level = "success"
+            summary = t("log_batch_done", s=success_count, f=fail_count, elapsed=elapsed_str)
+            if warn_count:
+                summary += t("log_batch_av_warn", w=warn_count)
+            self.log_highlight_signal.emit(summary, level)
+
+    def _warn_av_mismatch(self, ffprobe: Path | None, dst: Path) -> bool:
+        if ffprobe is None:
+            return False
+        mismatch = av_duration_mismatch(ffprobe, dst)
+        if mismatch is None:
+            return False
+        video, audio = mismatch
+        self.log_highlight_signal.emit(
+            t("log_av_mismatch", video=format_clock(video), audio=format_clock(audio)),
+            "warning",
+        )
+        return True
 
     def _repair_one(
         self,
@@ -2242,12 +2332,16 @@ class FastConvertWindow(QWidget):
     ) -> int:
         creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         with self._proc_lock:
+            # ffmpeg 输出 UTF-8，源文件元数据里还可能夹带 GBK 等原始字节，必须容错解码
             self._active_proc = subprocess.Popen(
                 cmd,
                 cwd=str(workdir),
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 creationflags=creationflags,
             )
             proc = self._active_proc
@@ -2259,6 +2353,7 @@ class FastConvertWindow(QWidget):
         total_duration = 0.0
         start_real = time.time()
         last_emit_time = 0.0
+        repeats: dict[str, list[Any]] = {}
 
         try:
             if proc.stdout:
@@ -2267,7 +2362,13 @@ class FastConvertWindow(QWidget):
                         break
                     line_str = line.rstrip()
                     if line_str:
-                        self.log_signal.emit(line_str)
+                        if TIME_REGEX.search(line_str):
+                            self.log_signal.emit(line_str)
+                        else:
+                            entry = repeats.setdefault(_LOG_REPEAT_KEY_REGEX.sub("#", line_str), [0, line_str])
+                            entry[0] += 1
+                            if entry[0] <= LOG_REPEAT_LIMIT:
+                                self.log_signal.emit(line_str)
                         if output_tail is not None:
                             output_tail.append(line_str)
                             if len(output_tail) > 80:
@@ -2313,11 +2414,19 @@ class FastConvertWindow(QWidget):
                                     "total_duration": total_duration,
                                 })
 
+            for count, sample in repeats.values():
+                if count > LOG_REPEAT_LIMIT:
+                    self.log_signal.emit(t("log_repeat_suppressed", count=count, line=sample))
+
             if self._cancel_batch and proc.poll() is None:
                 self._stop_active_proc()
                 return -1
             return proc.wait()
         finally:
+            # 读取中途出异常时没人再读管道，ffmpeg 写满缓冲区后会永久阻塞
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
             with self._proc_lock:
                 if self._active_proc is proc:
                     self._active_proc = None
